@@ -30,22 +30,24 @@ This project makes it visible and alerts on it.
 
 ## Architecture
 
+EKS in `us-west-2`, two managed node groups:
+
 ```mermaid
 flowchart TB
-  subgraph AWS["AWS / EKS (us-west-2)"]
-    subgraph sys["system node group (t3.large, on-demand)"]
-      PROM["Prometheus + Grafana<br/>(kube-prometheus-stack)"]
-    end
-    subgraph gpu["gpu node group (g4dn.xlarge spot, T4)<br/>taint nvidia.com/gpu=true"]
-      OP["NVIDIA GPU Operator<br/>device-plugin · GFD · dcgm-exporter"]
-      VLLM["vLLM<br/>facebook/opt-1.3b (fp16)"]
-      DCGM["dcgm-exporter<br/>:9400 /metrics"]
-    end
+  subgraph GPU["GPU node group — g4dn.xlarge spot, T4, tainted nvidia.com/gpu"]
+    direction LR
+    OP["NVIDIA GPU Operator<br/>device-plugin · GFD · dcgm-exporter"]
+    DCGM["dcgm-exporter<br/>:9400 /metrics"]
+    VLLM["vLLM<br/>facebook/opt-1.3b (fp16)"]
   end
 
-  DCGM -- "ServiceMonitor" --> PROM
-  VLLM -- "ServiceMonitor /metrics" --> PROM
-  PROM -- "GPUAllocatedButIdle<br/>GPUHighMemoryPressure" --> ALERT["Alertmanager"]
+  subgraph SYS["System node group — t3.large on-demand"]
+    PROM["Prometheus + Grafana<br/>kube-prometheus-stack"]
+  end
+
+  DCGM -->|ServiceMonitor| PROM
+  VLLM -->|ServiceMonitor /metrics| PROM
+  PROM -->|"GPUAllocatedButIdle<br/>GPUHighMemoryPressure"| ALERT["Alertmanager"]
   PROM --> DASH["Grafana dashboard:<br/>GPU_UTIL vs engine activity"]
 ```
 
