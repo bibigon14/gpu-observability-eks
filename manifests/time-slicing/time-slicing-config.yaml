@@ -1,0 +1,30 @@
+# Time-slicing: software GPU sharing for cards without MIG (the T4 in g4dn has no MIG).
+#
+# This advertises each physical GPU as `replicas` schedulable units, so multiple pods
+# land on one card and take turns via context switching. There is NO memory or fault
+# isolation - a pod can OOM its neighbors - so this is for dev/test or bursty,
+# non-critical, cooperative workloads, never hard multi-tenancy. For isolation on
+# A100/H100 you would use MIG instead.
+#
+# Apply, then point the GPU Operator at it:
+#   kubectl apply -f manifests/time-slicing/time-slicing-config.yaml
+#   kubectl -n gpu-operator patch clusterpolicy cluster-policy --type merge \
+#     -p '{"spec":{"devicePlugin":{"config":{"name":"time-slicing-config","default":"any"}}}}'
+#
+# A node then reports e.g. nvidia.com/gpu: 4 instead of 1. Verify:
+#   kubectl describe node -l workload-type=gpu | grep nvidia.com/gpu
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-slicing-config
+  namespace: gpu-operator
+data:
+  any: |-
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 4

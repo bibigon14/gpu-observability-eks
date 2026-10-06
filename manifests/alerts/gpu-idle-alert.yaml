@@ -1,0 +1,53 @@
+# The core SRE/FinOps signal for a GPU fleet: a card that is ALLOCATED but IDLE.
+#
+# A pod holds a whole GPU (framebuffer memory is reserved, so a process is resident),
+# yet the compute engines are doing almost nothing. nvidia-smi / GPU_UTIL can even show
+# high numbers because a tiny kernel is running. On a fleet of expensive cards this gap
+# is burned money - the thing a platform SRE is there to catch.
+#
+# "Allocated" is proxied by framebuffer memory in use; "idle" by sustained near-zero
+# engine activity. Thresholds are deliberately conservative - tune per fleet.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-utilization
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: gpu.rules
+      rules:
+        # Recording rule: the allocation-vs-activity gap, per GPU.
+        - record: gpu:allocated_but_idle:ratio
+          expr: |
+            (DCGM_FI_DEV_FB_USED > 1024)
+            and
+            (avg_over_time(DCGM_FI_PROF_GR_ENGINE_ACTIVE[15m]) < 0.05)
+
+        - alert: GPUAllocatedButIdle
+          expr: |
+            (DCGM_FI_DEV_FB_USED > 1024)
+            and
+            (avg_over_time(DCGM_FI_PROF_GR_ENGINE_ACTIVE[15m]) < 0.05)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU {{ $labels.gpu }} on {{ $labels.Hostname }} is allocated but idle"
+            description: >
+              Framebuffer memory is in use (a workload is resident) but the compute
+              engine has averaged under 5% activity for 15m. The card is reserved and
+              not doing work - reclaim it, repack via time-slicing, or right-size.
+
+        - alert: GPUHighMemoryPressure
+          expr: |
+            (DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)) > 0.95
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "GPU {{ $labels.gpu }} framebuffer over 95% - OOM risk"
+            description: >
+              GPU memory is the binding constraint for inference. Above 95% the next
+              allocation (a larger batch, longer KV-cache) risks an OOM kill.

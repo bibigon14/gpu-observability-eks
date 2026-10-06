@@ -1,0 +1,19 @@
+# vLLM exposes Prometheus metrics at /metrics on the API port: request counts,
+# time-to-first-token, end-to-end latency, running/waiting queue depth, and
+# KV-cache usage (vllm:gpu_cache_usage_perc). Pairing these with DCGM GPU metrics
+# is what makes the workload's behavior legible from the platform side.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm
+  namespace: workloads
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: vllm
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 5s

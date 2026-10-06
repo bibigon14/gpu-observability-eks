@@ -1,0 +1,29 @@
+# OPTIONAL: explicit dcgm-exporter counter set.
+#
+# The GPU Operator's default metrics already include profiling counters
+# (GR_ENGINE_ACTIVE, PIPE_TENSOR_ACTIVE, DRAM_ACTIVE, FB memory), which are enough
+# for the utilization-vs-allocation story. Apply this only to add fields such as
+# DCGM_FI_PROF_SM_ACTIVE / SM_OCCUPANCY.
+#
+# After applying:
+#   kubectl -n gpu-operator patch clusterpolicy cluster-policy --type merge \
+#     -p '{"spec":{"dcgmExporter":{"config":{"name":"dcgm-custom-metrics"}}}}'
+#   kubectl -n gpu-operator rollout restart ds -l app=nvidia-dcgm-exporter
+#
+# The CSV body is kept in dcp-metrics.csv; keep the two in sync if you edit either.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dcgm-custom-metrics
+  namespace: gpu-operator
+data:
+  dcgm-metrics.csv: |
+    DCGM_FI_DEV_GPU_UTIL,            gauge, GPU utilization (kernel active - not saturation).
+    DCGM_FI_PROF_SM_ACTIVE,          gauge, Fraction of time at least one warp was active on an SM.
+    DCGM_FI_PROF_SM_OCCUPANCY,       gauge, Fraction of resident warps on an SM.
+    DCGM_FI_PROF_PIPE_TENSOR_ACTIVE, gauge, Fraction of time the tensor pipe was active.
+    DCGM_FI_PROF_DRAM_ACTIVE,        gauge, Fraction of time the memory interface was active.
+    DCGM_FI_DEV_FB_USED,             gauge, Framebuffer memory used (MiB).
+    DCGM_FI_DEV_FB_FREE,             gauge, Framebuffer memory free (MiB).
+    DCGM_FI_DEV_GPU_TEMP,            gauge, GPU temperature (C).
+    DCGM_FI_DEV_POWER_USAGE,         gauge, Power draw (W).

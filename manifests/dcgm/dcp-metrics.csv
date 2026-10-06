@@ -1,0 +1,27 @@
+# Custom DCGM counter set for dcgm-exporter.
+# Rendered into the ConfigMap "dcgm-custom-metrics" (see kustomization.yaml) and
+# referenced by the GPU Operator via dcgmExporter.config.name.
+#
+# The PROF_* fields are the profiling counters that carry the REAL utilization
+# signal. GPU_UTIL alone only means "a kernel was running" - the whole point of
+# this project is to show the gap between that and actual SM/tensor activity.
+#
+# Format: DCGM_FIELD, metric_type, help_text
+
+# --- Utilization (the misleading one, kept for the comparison) ---
+DCGM_FI_DEV_GPU_UTIL,        gauge, GPU utilization (time a kernel was active - NOT saturation).
+
+# --- Real activity (profiling counters) ---
+DCGM_FI_PROF_SM_ACTIVE,      gauge, Fraction of time at least one warp was active on an SM.
+DCGM_FI_PROF_SM_OCCUPANCY,   gauge, Fraction of resident warps on an SM.
+DCGM_FI_PROF_PIPE_TENSOR_ACTIVE, gauge, Fraction of time the tensor (HMMA) pipe was active.
+DCGM_FI_PROF_DRAM_ACTIVE,    gauge, Fraction of time the device memory interface was active.
+
+# --- Memory ---
+DCGM_FI_DEV_FB_USED,         gauge, Framebuffer memory used (MiB).
+DCGM_FI_DEV_FB_FREE,         gauge, Framebuffer memory free (MiB).
+
+# --- Health / capacity ---
+DCGM_FI_DEV_GPU_TEMP,        gauge, GPU temperature (C).
+DCGM_FI_DEV_POWER_USAGE,     gauge, Power draw (W).
+DCGM_FI_DEV_SM_CLOCK,        gauge, SM clock (MHz).

@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored.
+
+region          = "us-west-2"
+cluster_name    = "gpu-observability-demo"
+cluster_version = "1.30"
+
+gpu_instance_type = "g4dn.xlarge" # 1x NVIDIA T4 16GB
+gpu_capacity_type = "SPOT"        # ON_DEMAND if spot capacity is unavailable
+
+# Do NOT put the Grafana password here. Set it in the shell before apply:
+#   export TF_VAR_grafana_admin_password='<something strong>'

@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: workloads
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      # Land on the GPU pool and tolerate its taint.
+      nodeSelector:
+        workload-type: gpu
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.6.3
+          args:
+            # Small open model that fits a T4 (16GB). No HF auth required.
+            - --model=facebook/opt-1.3b
+            # T4 is Turing (no bf16) - force fp16.
+            - --dtype=half
+            # Keep context modest so the KV-cache stays within VRAM headroom.
+            - --max-model-len=2048
+            - --gpu-memory-utilization=0.90
+            - --port=8000
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            limits:
+              # One whole GPU. T4 has no MIG; sub-GPU sharing is via time-slicing
+              # (see manifests/time-slicing/).
+              nvidia.com/gpu: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30 # model download + load into VRAM is slow (cold start)
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 20
