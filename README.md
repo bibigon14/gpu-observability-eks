@@ -34,19 +34,19 @@ This project makes it visible and alerts on it.
 flowchart TB
   subgraph AWS["AWS / EKS (us-west-2)"]
     subgraph sys["system node group (t3.large, on-demand)"]
-      PROM["Prometheus + Grafana\n(kube-prometheus-stack)"]
+      PROM["Prometheus + Grafana<br/>(kube-prometheus-stack)"]
     end
-    subgraph gpu["gpu node group (g4dn.xlarge spot, T4)\ntaint nvidia.com/gpu=true"]
-      OP["NVIDIA GPU Operator\ndevice-plugin · GFD · dcgm-exporter"]
-      VLLM["vLLM\nfacebook/opt-1.3b (fp16)"]
-      DCGM["dcgm-exporter\n:9400 /metrics"]
+    subgraph gpu["gpu node group (g4dn.xlarge spot, T4)<br/>taint nvidia.com/gpu=true"]
+      OP["NVIDIA GPU Operator<br/>device-plugin · GFD · dcgm-exporter"]
+      VLLM["vLLM<br/>facebook/opt-1.3b (fp16)"]
+      DCGM["dcgm-exporter<br/>:9400 /metrics"]
     end
   end
 
   DCGM -- "ServiceMonitor" --> PROM
   VLLM -- "ServiceMonitor /metrics" --> PROM
-  PROM -- "GPUAllocatedButIdle\nGPUHighMemoryPressure" --> ALERT["Alertmanager"]
-  PROM --> DASH["Grafana dashboard:\nGPU_UTIL vs engine activity"]
+  PROM -- "GPUAllocatedButIdle<br/>GPUHighMemoryPressure" --> ALERT["Alertmanager"]
+  PROM --> DASH["Grafana dashboard:<br/>GPU_UTIL vs engine activity"]
 ```
 
 Driver and container toolkit come from the EKS GPU-optimized AMI (`AL2_x86_64_GPU`); the
