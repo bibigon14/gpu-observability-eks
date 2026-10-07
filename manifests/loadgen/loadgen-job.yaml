@@ -1,6 +1,18 @@
 # Drives real inference load at vLLM so the dashboards show the GPU doing actual work.
-# Run it after vLLM is Ready; the contrast between this (engines active) and steady
-# state (model resident, engines idle -> GPUAllocatedButIdle fires) is the whole story.
+#
+# The money shot this produces: under this load DCGM_FI_DEV_GPU_UTIL pegs near 100%
+# (there is always a kernel queued), while DCGM_FI_PROF_GR_ENGINE_ACTIVE / TENSOR_ACTIVE
+# stay low - a tiny model (opt-1.3b) served with high concurrency keeps the card "busy"
+# without actually using it. That divergence is the whole point of the project.
+#
+# Two things this job does that a naive curl loop does not, and why:
+#   1. It waits for /health to return 200 before sending load. Firing at a not-yet-Ready
+#      endpoint is what produced the earlier "req 000" (connection refused) noise.
+#   2. It runs many concurrent workers for several minutes. DCGM is scraped every 30s
+#      (the dcgm-exporter chart hard-caps the ServiceMonitor timeout at 25s, so interval
+#      must be >= 25s - see postmortem #7), so the load has to be SUSTAINED, not bursty,
+#      to register across multiple scrape points. A single sequential loop leaves gaps
+#      between requests and the 30s scrape averages it down to nothing.
 #
 #   kubectl apply -f manifests/loadgen/loadgen-job.yaml
 #   kubectl -n workloads logs -f job/vllm-loadgen
@@ -17,17 +29,46 @@ spec:
       containers:
         - name: loadgen
           image: curlimages/curl:8.10.1
+          env:
+            - name: BASE
+              value: "http://vllm.workloads.svc.cluster.local:8000"
+            - name: WORKERS
+              value: "24" # concurrent request streams - enough to keep GPU_UTIL pegged
+            - name: DURATION
+              value: "300" # seconds of sustained load; spans ~10 DCGM scrape points
+            - name: MAX_TOKENS
+              value: "96" # short completions: many small kernels, low tensor occupancy
           command: ["/bin/sh", "-c"]
           args:
             - |
-              echo "driving load against vllm for ~4 minutes..."
-              end=$(( $(date +%s) + 240 ))
-              i=0
-              while [ "$(date +%s)" -lt "$end" ]; do
-                curl -s http://vllm.workloads.svc.cluster.local:8000/v1/completions \
-                  -H 'Content-Type: application/json' \
-                  -d '{"model":"facebook/opt-1.3b","prompt":"Explain Kubernetes to an SRE in two sentences.","max_tokens":128,"temperature":0.7}' \
-                  -o /dev/null -w "req %{http_code} %{time_total}s\n"
+              set -eu
+
+              echo "waiting for vLLM /health ..."
+              # vLLM cold start = image pull + model download + load into VRAM. Poll up to 10min.
+              deadline=$(( $(date +%s) + 600 ))
+              until [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health")" = "200" ]; do
+                [ "$(date +%s)" -lt "$deadline" ] || { echo "vLLM never became healthy"; exit 1; }
+                sleep 5
+              done
+              echo "vLLM healthy - driving $WORKERS concurrent streams for ${DURATION}s"
+
+              end=$(( $(date +%s) + DURATION ))
+              worker() {
+                n=0
+                while [ "$(date +%s)" -lt "$end" ]; do
+                  curl -s "$BASE/v1/completions" \
+                    -H 'Content-Type: application/json' \
+                    -d "{\"model\":\"facebook/opt-1.3b\",\"prompt\":\"Explain Kubernetes to an SRE in two sentences.\",\"max_tokens\":$MAX_TOKENS,\"temperature\":0.7}" \
+                    -o /dev/null -w "w$1 req %{http_code} %{time_total}s\n"
+                  n=$((n+1))
+                done
+                echo "worker $1 done: $n requests"
+              }
+
+              i=1
+              while [ "$i" -le "$WORKERS" ]; do
+                worker "$i" &
                 i=$((i+1))
               done
-              echo "done, $i requests"
+              wait
+              echo "load generation complete"

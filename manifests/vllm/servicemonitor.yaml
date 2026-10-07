@@ -16,4 +16,9 @@ spec:
   endpoints:
     - port: http
       path: /metrics
-      interval: 5s
+      # scrapeTimeout must be <= interval or the Prometheus Operator silently drops the
+      # whole ServiceMonitor (same gotcha that hid the dcgm target - see docs/postmortem.md #7).
+      # A bare interval: 5s inherits the 10s global scrape timeout and gets rejected, which is
+      # why the vLLM KV-cache / queue panels read "No data".
+      interval: 15s
+      scrapeTimeout: 10s

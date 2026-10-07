@@ -19,3 +19,5 @@ terraform.rc
 *.pem
 .env
 .DS_Store
+tf.plan
+*.tfplan

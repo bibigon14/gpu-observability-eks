@@ -70,9 +70,20 @@ module "eks" {
       instance_types = [var.gpu_instance_type]
       capacity_type  = var.gpu_capacity_type
 
-      # The vLLM image (~8GB) plus the model downloaded into the container fills the
-      # default ~20GB volume and triggers DiskPressure evictions, so give it headroom.
-      disk_size = 100
+      # The vLLM image (~8GB) plus the model fills the default ~20GB volume and triggers
+      # DiskPressure evictions. NOTE: the top-level `disk_size` is IGNORED when the module
+      # uses a launch template (which it does), so the root volume must be sized via
+      # block_device_mappings instead. (disk_size=100 silently had no effect - see postmortem.)
+      block_device_mappings = {
+        xvda = {
+          device_name = "/dev/xvda"
+          ebs = {
+            volume_size           = 100
+            volume_type           = "gp3"
+            delete_on_termination = true
+          }
+        }
+      }
 
       min_size     = var.gpu_min_size
       max_size     = var.gpu_max_size

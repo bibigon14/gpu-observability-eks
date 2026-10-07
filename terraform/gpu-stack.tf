@@ -10,8 +10,8 @@
 #
 # See docs/postmortem.md for the full path that led here.
 #
-# Chart versions are intentionally left unpinned for the first working run; pin them
-# to the resolved versions once the stack is green (helm list -A shows them).
+# Chart versions are pinned to the resolved versions from the first green run (helm list -A)
+# so a clean rebuild is reproducible and a new upstream chart can't silently change the stack.
 
 locals {
   gpu_tolerations = [{
@@ -31,6 +31,7 @@ resource "helm_release" "nvidia_device_plugin" {
   name             = "nvidia-device-plugin"
   repository       = "https://nvidia.github.io/k8s-device-plugin"
   chart            = "nvidia-device-plugin"
+  version          = "0.20.1" # pinned from the first green run (helm list -A)
   namespace        = "gpu-operator"
   create_namespace = true
   timeout          = 300
@@ -47,6 +48,7 @@ resource "helm_release" "dcgm_exporter" {
   name             = "dcgm-exporter"
   repository       = "https://nvidia.github.io/dcgm-exporter/helm-charts"
   chart            = "dcgm-exporter"
+  version          = "4.8.4" # pinned from the first green run (helm list -A)
   namespace        = "gpu-operator"
   create_namespace = true
   timeout          = 300
@@ -55,9 +57,12 @@ resource "helm_release" "dcgm_exporter" {
     nodeSelector = local.gpu_node_selector
     tolerations  = local.gpu_tolerations
     # Let kube-prometheus-stack scrape it (Prometheus Operator CRDs come from monitoring.tf).
+    # NOTE: the chart hard-codes scrapeTimeout=25s and the Prometheus Operator rejects a
+    # ServiceMonitor whose interval is shorter than its timeout, so interval must be >= 25s.
+    # (A 5s interval here silently dropped the whole ServiceMonitor - see docs/postmortem.md.)
     serviceMonitor = {
       enabled  = true
-      interval = "5s"
+      interval = "30s"
     }
   })]
 

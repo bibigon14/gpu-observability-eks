@@ -15,6 +15,10 @@ spec:
       labels:
         app: vllm
     spec:
+      # Kubernetes injects legacy per-Service env vars (e.g. VLLM_PORT=tcp://<ip>:8000
+      # for the Service named "vllm"). vLLM reads VLLM_PORT as an integer port and
+      # crashes on that value, so disable the auto-injected service links.
+      enableServiceLinks: false
       # Land on the GPU pool and tolerate its taint.
       nodeSelector:
         workload-type: gpu

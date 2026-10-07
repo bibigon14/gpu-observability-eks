@@ -8,7 +8,7 @@ than the full GPU Operator.
 
 ## Summary
 
-Six distinct failures, each a real-world EKS-GPU gotcha:
+Ten distinct failures, each a real-world EKS-GPU gotcha:
 
 | # | Symptom | Root cause | Resolution |
 |---|---------|-----------|------------|
@@ -17,7 +17,11 @@ Six distinct failures, each a real-world EKS-GPU gotcha:
 | 3 | `operator-validator` loops "failed to validate the driver"; `nvidia-smi` → `Failed to initialize NVML` | GPU Operator with `driver.enabled=false` on the **accelerated AMI** does not cleanly validate a host-installed driver | Abandoned the pre-installed-driver + operator combination |
 | 4 | `nvidia-driver-daemonset` → `ImagePullBackOff: nvcr.io/nvidia/driver:550.90.07-amzn2023: not found` | Operator-managed driver on a plain AL2023 node needs a driver image for that OS; **no generic `amzn2023` image exists** for the operator's default driver version | Stopped trying to have the operator manage the driver |
 | 5 | `DaemonSet "nvidia-device-plugin-mps-control-daemon" ... cannot be imported` | A **destroyed GPU Operator left orphaned resources** in the namespace that the new standalone chart could not adopt | Rebuilt the cluster clean on a current k8s version |
-| 6 | vLLM pods evicted `ContainerStatusUnknown`; node `DiskPressure: True` | The vLLM image (~8GB) + model fills the **default ~20GB node volume** | Set `disk_size = 100` on the GPU node group |
+| 6 | vLLM pods evicted `ContainerStatusUnknown`; node `DiskPressure: True` | The vLLM image (~8GB) + model fills the **default ~20GB node volume** | Sized the root volume to 100GB (see #8 for how) |
+| 7 | dcgm `ServiceMonitor` silently produced no metrics; Operator log: `scrapeTimeout 25s greater than scrapeInterval 5s` | The dcgm-exporter chart hard-codes `scrapeTimeout=25s`; the **Prometheus Operator rejects any ServiceMonitor whose interval is shorter than its timeout**, dropping the whole target | Set the dcgm ServiceMonitor `interval` to `30s` (must be `>= 25s`) |
+| 8 | `disk_size = 100` had **no effect**; nodes still came up with the ~20GB default and kept hitting DiskPressure (#6) | The EKS module provisions the node group via a **launch template**, and the top-level `disk_size` is ignored when a launch template is in play | Sized the root volume through `block_device_mappings` (`/dev/xvda`, 100GB gp3) instead |
+| 9 | vLLM crash-loops: `ValueError: invalid literal for int() with base 10: 'tcp://172.20.x.x:8000'` | Kubernetes injects legacy per-Service env vars; the Service named `vllm` injects `VLLM_PORT=tcp://<ip>:8000`, which **vLLM reads as its integer port** and chokes on | Set `enableServiceLinks: false` on the pod spec |
+| 10 | `terraform apply` fails after ~40min: `NodeCreationFailure: new nodes are not joining the cluster` on a GPU node-group replacement | A node-group update that **replaces** the instance (here, moving the root volume to `block_device_mappings`) rolls a new node that failed to register; the old 100GB node was already drained, leaving only a stale cordoned node | Left the observability pipeline proven on the surviving node; teardown via `terraform destroy` rather than reconciling the half-applied update |
 
 ## Timeline (abridged)
 

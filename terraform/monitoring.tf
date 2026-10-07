@@ -22,19 +22,15 @@ resource "helm_release" "kube_prometheus_stack" {
       service = {
         type = "ClusterIP" # port-forward for the demo; no public LB
       }
-      # Auto-load the GPU dashboard shipped in this repo (mounted via the sidecar).
-      dashboardProviders = {
-        "dashboardproviders.yaml" = {
-          apiVersion = 1
-          providers = [{
-            name            = "gpu"
-            orgId           = 1
-            folder          = "GPU"
-            type            = "file"
-            disableDeletion = false
-            editable        = true
-            options         = { path = "/var/lib/grafana/dashboards/gpu" }
-          }]
+      # The dashboard sidecar watches for ConfigMaps labeled grafana_dashboard and provisions
+      # them into Grafana automatically. The GPU dashboard ships as exactly such a ConfigMap
+      # (kubernetes_config_map_v1.gpu_dashboard below), so a clean apply brings Grafana up with
+      # the dashboard already loaded - no manual import step.
+      sidecar = {
+        dashboards = {
+          enabled         = true
+          label           = "grafana_dashboard"
+          searchNamespace = "monitoring"
         }
       }
     }
@@ -50,4 +46,26 @@ resource "helm_release" "kube_prometheus_stack" {
       }
     }
   })]
+}
+
+# --- GPU dashboard ------------------------------------------------------------
+
+# The GPU dashboard, shipped as a sidecar-discovered ConfigMap. The dashboard JSON carries
+# no hard-coded datasource (templating.list is empty and no panel pins a datasource uid), so
+# Grafana binds every panel to the default Prometheus datasource on whatever cluster this
+# lands in - which is what makes it safe to provision blind on a freshly built cluster.
+resource "kubernetes_config_map_v1" "gpu_dashboard" {
+  metadata {
+    name      = "gpu-utilization-vs-allocation"
+    namespace = "monitoring"
+    labels = {
+      grafana_dashboard = "1"
+    }
+  }
+
+  data = {
+    "gpu-utilization-vs-allocation.json" = file("${path.module}/../dashboards/gpu-utilization-vs-allocation.json")
+  }
+
+  depends_on = [helm_release.kube_prometheus_stack]
 }
