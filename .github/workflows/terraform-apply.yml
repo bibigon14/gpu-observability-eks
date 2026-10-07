@@ -1,11 +1,16 @@
 name: terraform-apply
 
+# Manual only, with a typed confirmation. A real apply builds a live GPU cluster, so it
+# is a deliberate action gated behind the "production" environment (reviewer approval) and
+# GitHub OIDC - never an automatic push trigger. Day-to-day the cluster is applied locally;
+# formatting and validation run on every push via ci.yml.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "terraform/**"
-      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "apply" to confirm a real cluster apply'
+        required: true
+        default: ""
 
 permissions:
   id-token: write

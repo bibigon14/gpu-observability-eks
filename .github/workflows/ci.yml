@@ -1,0 +1,44 @@
+name: ci
+
+# Credential-free quality gate: formatting, provider init, and config validation.
+# No AWS access and no backend - this never touches real infrastructure, so it runs
+# green on every push and PR without any configured secrets or OIDC role. Real applies
+# and destroys are deliberate, manual workflows (terraform-apply / terraform-destroy).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9.5"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Format
+        run: terraform fmt -check -recursive
+
+      - name: Init (no backend)
+        run: terraform init -backend=false
+
+      - name: Validate
+        run: terraform validate
