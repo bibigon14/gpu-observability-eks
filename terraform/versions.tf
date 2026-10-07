@@ -20,10 +20,10 @@ terraform {
   # one S3 bucket, a per-project state key, DynamoDB lock table.
   # See bootstrap.md. REPLACE_ME values are filled during bootstrap.
   backend "s3" {
-    bucket         = "REPLACE_ME_TFSTATE_BUCKET"
+    bucket         = "dstepanov-tfstate-493539461415"
     key            = "gpu-observability-eks/terraform.tfstate"
     region         = "us-west-2"
-    dynamodb_table = "REPLACE_ME_TFSTATE_LOCK_TABLE"
+    dynamodb_table = "terraform-eks-platform-tfstate-lock"
     encrypt        = true
   }
 }
