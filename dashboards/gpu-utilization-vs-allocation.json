@@ -415,6 +415,366 @@
         }
       ],
       "description": "KV-cache is the binding resource in vLLM. Once full, new requests queue (waiting) and in-flight ones get swapped to CPU, torching TTFT. waiting > 0 or swapped > 0 = saturation."
+    },
+    {
+      "title": "SLO: TTFT compliance (fraction of requests under 1s)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 0,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "unit": "percentunit",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.99
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "sli:vllm_ttft_compliance:ratio5m",
+          "legendFormat": "TTFT compliance (5m)"
+        }
+      ],
+      "description": "Fraction of TTFT measurements at or under 1s over the last 5 minutes. The SLO target is 99.5% (0.995). Values below cross the orange threshold; sustained below drive the burn-rate alerts."
+    },
+    {
+      "title": "TTFT compliance (now)",
+      "type": "stat",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.99
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "sli:vllm_ttft_compliance:ratio5m",
+          "legendFormat": "compliance"
+        }
+      ],
+      "description": "Current 5m compliance ratio. Green >= 99.5% (SLO met), orange 99.0-99.5% (burning budget), red < 99.0% (fast burn)."
+    },
+    {
+      "title": "SLO burn rate (1h and 6h)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "unit": "short",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 6
+              },
+              {
+                "color": "red",
+                "value": 14.4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "slo:vllm_ttft_burn_rate:1h",
+          "legendFormat": "1h burn rate"
+        },
+        {
+          "refId": "B",
+          "datasource": null,
+          "expr": "slo:vllm_ttft_burn_rate:6h",
+          "legendFormat": "6h burn rate"
+        }
+      ],
+      "description": "How fast the TTFT error budget is being spent compared to steady-state. 14.4 (red line) = 2% of monthly budget consumed in 1h (fast-burn alert threshold). 6 (orange line) = 5% in 6h (slow-burn). 1 = at steady-state - budget exactly spent over 30d."
+    },
+    {
+      "title": "Fleet $/hr",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "cost:fleet_hourly_usd",
+          "legendFormat": "fleet $/hr"
+        }
+      ],
+      "description": "Hourly burn for the GPU fleet, driven by cost:gpu_hourly_usd (default $0.526 for g4dn.xlarge on-demand) multiplied by the number of GPUs currently reporting metrics. Swap the record rule value to match your fleet's effective rate."
+    },
+    {
+      "title": "Tokens per $",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50000
+              },
+              {
+                "color": "green",
+                "value": 100000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "cost:tokens_per_usd:rate1m",
+          "legendFormat": "tokens/$"
+        }
+      ],
+      "description": "Tokens generated per US dollar at the current rate. The headline FinOps metric for inference. Rises with throughput, falls with idle time."
+    },
+    {
+      "title": "$ per 1M tokens",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "cost:usd_per_million_tokens:rate1m",
+          "legendFormat": "$ / 1M tokens"
+        }
+      ],
+      "description": "Inverse of tokens-per-dollar. The price per 1M generated tokens at the current rate - directly comparable to OpenAI / Anthropic / Together / Groq published rates."
     }
   ]
 }

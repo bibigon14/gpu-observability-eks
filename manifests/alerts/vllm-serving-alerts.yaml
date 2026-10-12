@@ -82,3 +82,80 @@ spec:
               Non-zero swap for 10m means KV-cache stays full long enough to push
               requests back to CPU memory. This is a tail-latency killer; capacity
               or model-size decision point.
+
+    # ---------------------------------------------------------------------
+    # v0.4: SLO burn rate and cost records / alerts.
+    #
+    # SLI definition - fraction of requests whose TTFT is at or under the
+    # 1-second budget. Request-level, computed from the bucket histogram so
+    # a 5m rolling value is cheap and matches the dashboard panel.
+    #
+    # SLO target - 99.5% compliance over 30 days (error budget ~3.6 h / month).
+    # Fast-burn alert: burn rate > 14.4 for 2m
+    #   (consuming 2% of the monthly budget in 1h at that rate - page-worthy).
+    # Slow-burn alert: burn rate > 6 for 15m
+    #   (5% of monthly budget in 6h - ticket-worthy, usually a capacity signal).
+    # ---------------------------------------------------------------------
+    - name: vllm.sli
+      rules:
+        - record: sli:vllm_ttft_good:rate5m
+          expr: sum(rate(vllm:time_to_first_token_seconds_bucket{le="1.0"}[5m]))
+        - record: sli:vllm_ttft_total:rate5m
+          expr: sum(rate(vllm:time_to_first_token_seconds_count[5m]))
+        - record: sli:vllm_ttft_compliance:ratio5m
+          expr: |
+            sli:vllm_ttft_good:rate5m / sli:vllm_ttft_total:rate5m
+
+        - record: slo:vllm_ttft_burn_rate:1h
+          expr: |
+            (1 - avg_over_time(sli:vllm_ttft_compliance:ratio5m[1h])) / 0.005
+        - record: slo:vllm_ttft_burn_rate:6h
+          expr: |
+            (1 - avg_over_time(sli:vllm_ttft_compliance:ratio5m[6h])) / 0.005
+
+        - alert: VLLMTTFTBudgetFastBurn
+          expr: slo:vllm_ttft_burn_rate:1h > 14.4
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "vLLM TTFT SLO fast-burn: 2% of monthly budget in 1h"
+            description: >
+              The 1h burn rate against the 99.5% TTFT-under-1s SLO is above 14.4,
+              meaning the service is on track to burn 2% of the monthly error
+              budget in a single hour. Usually caused by KV-cache saturation,
+              scheduler backpressure, or a sudden capacity loss (spot preemption,
+              node failure).
+
+        - alert: VLLMTTFTBudgetSlowBurn
+          expr: slo:vllm_ttft_burn_rate:6h > 6
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM TTFT SLO slow-burn: 5% of monthly budget in 6h"
+            description: >
+              The 6h burn rate against the TTFT SLO is above 6. Capacity is
+              probably undersized for the current traffic profile - either add
+              a replica (HPA on queue depth) or scale the GPU pool.
+
+    # ---------------------------------------------------------------------
+    # v0.4: cost records. The one adjustable knob is cost:gpu_hourly_usd -
+    # swap it for your fleet's effective rate (reservations, savings plans,
+    # spot discount, etc). Everything else derives from it + GPU count.
+    #
+    # Default below: g4dn.xlarge on-demand (~$0.526/hr). Spot would be ~$0.16.
+    # ---------------------------------------------------------------------
+    - name: cost.rules
+      rules:
+        - record: cost:gpu_hourly_usd
+          expr: vector(0.526)
+        - record: cost:fleet_hourly_usd
+          expr: cost:gpu_hourly_usd * count(DCGM_FI_DEV_GPU_UTIL)
+        - record: cost:tokens_per_usd:rate1m
+          expr: |
+            (job:vllm_tokens_per_sec:rate1m * 3600) / cost:fleet_hourly_usd
+        - record: cost:usd_per_million_tokens:rate1m
+          expr: |
+            1e6 / cost:tokens_per_usd:rate1m
+

@@ -190,6 +190,81 @@ picture: idle vs busy (DCGM), busy vs working (`GR_ENGINE_ACTIVE` vs `GPU_UTIL`)
 working vs delivering (vLLM tokens/sec, TTFT), delivering vs cost-efficient
 (tokens/sec per GPU).
 
+## SLO burn rate and cost (v0.4)
+
+v0.3 showed what the service is doing right now. v0.4 adds the two layers that
+a Senior SRE audience actually wants to see: an SLO with a real error budget
+and burn-rate alerts (SRE maturity), and a serving-cost line that connects
+throughput to dollars (FinOps credibility).
+
+**The headline cost number**: on a single `g4dn.xlarge` (one Tesla T4,
+on-demand, no reservations) serving `facebook/opt-1.3b` under 24-stream load,
+this stack reports **$0.137 per 1M generated tokens** at a steady ~7M
+tokens/$ efficiency - directly comparable to the published inference rates on
+OpenAI, Anthropic, Together and Groq.
+
+![v0.4 cost tiles: fleet $/hr, tokens per $, $ per 1M tokens](docs/screenshots/09-cost-tiles-closeup.png)
+
+**Full v0.4 block under load**: the three new rows (SLO compliance, burn
+rate, cost) sit directly under the vLLM serving panels on the same dashboard,
+so a reviewer reads hardware → serving → SLO → cost in one top-down scroll.
+
+![v0.4 overview: SLO at 100%, burn rate flat, cost tiles live](docs/screenshots/08-v04-slo-and-cost-under-load.png)
+
+### SLO
+
+**Target**: 99.5% of TTFT measurements at or under 1s, over a 30-day window.
+That gives an error budget of 0.5% - about 3.6 hours of out-of-SLO time per
+month. The SLI is request-level, computed from the TTFT histogram's `le=1.0`
+bucket, so the dashboard panel and the alert expression share the same math.
+
+| Record rule | What it is |
+|------|------|
+| `sli:vllm_ttft_compliance:ratio5m` | Fraction of TTFT measurements under 1s, 5m rolling |
+| `slo:vllm_ttft_burn_rate:1h` | 1h burn rate against the 99.5% target |
+| `slo:vllm_ttft_burn_rate:6h` | 6h burn rate against the same target |
+
+**Burn-rate alerts** - the thing that makes an SLO actually operational.
+Classic multi-window pattern from the Google SRE workbook, two tiers:
+
+| Alert | Fires on | What it means |
+|------|------|------|
+| `VLLMTTFTBudgetFastBurn` | `burn_rate:1h > 14.4` for 2m | 2% of monthly budget spent in 1h - page-worthy |
+| `VLLMTTFTBudgetSlowBurn` | `burn_rate:6h > 6` for 15m | 5% in 6h - ticket-worthy, usually a capacity signal |
+
+In the screenshots the compliance ratio sits at 100% and both burn rates sit
+at 0 - healthy state, consistent with TTFT staying well under 1s on a small
+model. The threshold lines on the burn-rate panel make the alert boundaries
+visible even when the service is nowhere near them.
+
+### Cost
+
+One config knob - `cost:gpu_hourly_usd` (default `0.526` for `g4dn.xlarge`
+on-demand; `0.158` on spot). Swap the record rule value to match the fleet's
+effective rate (reservations, savings plans, custom spot discounts).
+Everything else derives from it and the GPU count the DCGM exporter reports.
+
+| Record rule | What it is |
+|------|------|
+| `cost:gpu_hourly_usd` | Config: USD per GPU-hour |
+| `cost:fleet_hourly_usd` | `cost:gpu_hourly_usd * count(GPUs)` |
+| `cost:tokens_per_usd:rate1m` | Current generation throughput per dollar |
+| `cost:usd_per_million_tokens:rate1m` | Inverse of above - directly comparable to the published rates on OpenAI, Anthropic, Together, Groq |
+
+### What this lets a reviewer check in 30 seconds
+
+Open the dashboard and the picture reads top-to-bottom as:
+
+- Hardware: is the GPU doing anything at all (DCGM gap).
+- Serving: how much, how fast (vLLM throughput, latencies).
+- Promise: is the service meeting what we told users (SLO compliance,
+  budget burn).
+- Cost: what is the output worth (tokens per dollar, dollars per
+  1M tokens).
+
+The order is deliberate - it is the same order someone would ask about an
+AI-serving system in an interview.
+
 ## Teardown
 
 ```bash
