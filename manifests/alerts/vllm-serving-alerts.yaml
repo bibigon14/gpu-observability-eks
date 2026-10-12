@@ -1,0 +1,84 @@
+# vLLM serving-quality alerts. The GPU-level alerts in gpu-idle-alert.yaml catch
+# cost waste (allocated-but-idle); these catch user-visible degradation on a card
+# that is in use. Pairing them is the point: a serving system can be both busy
+# AND slow (KV-cache full, queue backing up) or both idle AND wasteful - two
+# different alerts, two different owners.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: vllm-serving
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: vllm.rules
+      rules:
+        # Record rules: precompute per-cluster throughput / efficiency.
+        # Dashboards and alerts reuse these so expensive histograms are evaluated once.
+        - record: job:vllm_tokens_per_sec:rate1m
+          expr: sum(rate(vllm:generation_tokens_total[1m]))
+
+        - record: job:vllm_ttft_seconds:p95
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))
+            )
+
+        - record: job:vllm_e2e_seconds:p99
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m]))
+            )
+
+        - alert: VLLMHighTTFT
+          expr: job:vllm_ttft_seconds:p95 > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM TTFT p95 above 2s for 5m"
+            description: >
+              Time-to-first-token p95 has been >2s for 5m. User-perceived "the
+              model started answering" latency. Common causes: KV-cache near full
+              (check vllm:gpu_cache_usage_perc), prefill queue backing up (check
+              vllm:num_requests_waiting), or batch size misconfigured.
+
+        - alert: VLLMQueueBackup
+          expr: avg_over_time(vllm:num_requests_waiting[5m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM request queue averaging >5 waiting for 5m"
+            description: >
+              The waiting queue has averaged above 5 requests for 5m. Either the
+              workload needs more GPU capacity (horizontal: more replicas, or
+              vertical: a bigger card) or admission is unbounded. Watch alongside
+              KV-cache usage.
+
+        - alert: VLLMKVCacheSaturated
+          expr: vllm:gpu_cache_usage_perc > 0.95
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM KV-cache above 95% for 5m"
+            description: >
+              The KV-cache is the binding resource for vLLM throughput. Above 95%,
+              new requests cannot be scheduled without swapping (see
+              vllm:num_requests_swapped) - TTFT and E2E latency climb sharply.
+
+        - alert: VLLMSwappingUnderLoad
+          expr: vllm:num_requests_swapped > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "vLLM has been swapping requests out of VRAM for 10m"
+            description: >
+              Non-zero swap for 10m means KV-cache stays full long enough to push
+              requests back to CPU memory. This is a tail-latency killer; capacity
+              or model-size decision point.

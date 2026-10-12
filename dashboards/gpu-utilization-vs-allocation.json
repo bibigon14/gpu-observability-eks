@@ -1,84 +1,420 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 1,
   "schemaVersion": 39,
-  "tags": ["gpu", "dcgm", "sre"],
+  "tags": [
+    "gpu",
+    "dcgm",
+    "sre"
+  ],
   "title": "GPU Utilization vs Allocation",
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "refresh": "10s",
-  "templating": { "list": [] },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
       "type": "timeseries",
       "title": "The gap: GPU_UTIL vs real engine activity",
       "description": "GPU_UTIL only means a kernel was running. GR_ENGINE_ACTIVE and TENSOR_ACTIVE are the real work. A wide gap = the card looks busy but is underused.",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "fillOpacity": 10, "lineWidth": 2 } }
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2
+          }
+        }
       },
       "targets": [
-        { "expr": "DCGM_FI_DEV_GPU_UTIL / 100", "legendFormat": "GPU_UTIL (kernel active)", "refId": "A" },
-        { "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE", "legendFormat": "GR_ENGINE_ACTIVE (real compute)", "refId": "B" },
-        { "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE", "legendFormat": "TENSOR_ACTIVE (tensor cores)", "refId": "C" }
+        {
+          "expr": "DCGM_FI_DEV_GPU_UTIL / 100",
+          "legendFormat": "GPU_UTIL (kernel active)",
+          "refId": "A"
+        },
+        {
+          "expr": "DCGM_FI_PROF_GR_ENGINE_ACTIVE",
+          "legendFormat": "GR_ENGINE_ACTIVE (real compute)",
+          "refId": "B"
+        },
+        {
+          "expr": "DCGM_FI_PROF_PIPE_TENSOR_ACTIVE",
+          "legendFormat": "TENSOR_ACTIVE (tensor cores)",
+          "refId": "C"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Framebuffer memory (allocation proxy)",
       "description": "Memory in use means a workload is resident. Memory high + engine activity low = allocated-but-idle.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
-      "fieldConfig": { "defaults": { "unit": "decmbytes" } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes"
+        }
+      },
       "targets": [
-        { "expr": "DCGM_FI_DEV_FB_USED", "legendFormat": "FB used (MiB)", "refId": "A" },
-        { "expr": "DCGM_FI_DEV_FB_FREE", "legendFormat": "FB free (MiB)", "refId": "B" }
+        {
+          "expr": "DCGM_FI_DEV_FB_USED",
+          "legendFormat": "FB used (MiB)",
+          "refId": "A"
+        },
+        {
+          "expr": "DCGM_FI_DEV_FB_FREE",
+          "legendFormat": "FB free (MiB)",
+          "refId": "B"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Memory bandwidth activity",
       "description": "DRAM_ACTIVE shows whether the workload is memory-bound vs compute-bound.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
-      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        }
+      },
       "targets": [
-        { "expr": "DCGM_FI_PROF_DRAM_ACTIVE", "legendFormat": "DRAM_ACTIVE", "refId": "A" }
+        {
+          "expr": "DCGM_FI_PROF_DRAM_ACTIVE",
+          "legendFormat": "DRAM_ACTIVE",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "stat",
       "title": "Allocated but idle (GPUs)",
       "description": "Count of GPUs holding memory while engines are <5% active. This is the cost signal.",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 17 },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         }
       },
       "targets": [
-        { "expr": "count((DCGM_FI_DEV_FB_USED > 1024) and (avg_over_time(DCGM_FI_PROF_GR_ENGINE_ACTIVE[15m]) < 0.05)) or vector(0)", "refId": "A" }
-      ]
-    },
-    {
-      "type": "timeseries",
-      "title": "vLLM: KV-cache usage & queue depth",
-      "description": "KV-cache grows with concurrency and context length - a common OOM path. Queue depth shows batching pressure.",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 17 },
-      "fieldConfig": { "defaults": {} },
-      "targets": [
-        { "expr": "vllm:gpu_cache_usage_perc", "legendFormat": "KV-cache usage", "refId": "A" },
-        { "expr": "vllm:num_requests_running", "legendFormat": "running", "refId": "B" },
-        { "expr": "vllm:num_requests_waiting", "legendFormat": "waiting", "refId": "C" }
+        {
+          "expr": "count((DCGM_FI_DEV_FB_USED > 1024) and (avg_over_time(DCGM_FI_PROF_GR_ENGINE_ACTIVE[15m]) < 0.05)) or vector(0)",
+          "refId": "A"
+        }
       ]
     },
     {
       "type": "timeseries",
       "title": "Power & temperature",
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 17 },
-      "fieldConfig": { "defaults": {} },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {}
+      },
       "targets": [
-        { "expr": "DCGM_FI_DEV_POWER_USAGE", "legendFormat": "power (W)", "refId": "A" },
-        { "expr": "DCGM_FI_DEV_GPU_TEMP", "legendFormat": "temp (C)", "refId": "B" }
+        {
+          "expr": "DCGM_FI_DEV_POWER_USAGE",
+          "legendFormat": "power (W)",
+          "refId": "A"
+        },
+        {
+          "expr": "DCGM_FI_DEV_GPU_TEMP",
+          "legendFormat": "temp (C)",
+          "refId": "B"
+        }
       ]
+    },
+    {
+      "title": "vLLM throughput (tokens/sec)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "sum(rate(vllm:generation_tokens_total[1m]))",
+          "legendFormat": "generation tokens/sec"
+        },
+        {
+          "refId": "B",
+          "datasource": null,
+          "expr": "sum(rate(vllm:prompt_tokens_total[1m]))",
+          "legendFormat": "prompt tokens/sec"
+        }
+      ],
+      "description": "Real serving throughput: generation = tokens emitted per second, prompt = tokens ingested per second. The headline metric for LLM serving - tokens/sec per GPU-hour."
+    },
+    {
+      "title": "vLLM latency percentiles (TTFT and E2E)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "s",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+          "legendFormat": "TTFT p50"
+        },
+        {
+          "refId": "B",
+          "datasource": null,
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+          "legendFormat": "TTFT p95"
+        },
+        {
+          "refId": "C",
+          "datasource": null,
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))",
+          "legendFormat": "E2E p50"
+        },
+        {
+          "refId": "D",
+          "datasource": null,
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))",
+          "legendFormat": "E2E p95"
+        },
+        {
+          "refId": "E",
+          "datasource": null,
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))",
+          "legendFormat": "E2E p99"
+        }
+      ],
+      "description": "TTFT (time to first token) = scheduler + prefill latency, what the user feels as 'the model started answering'. E2E = full request. p95/p99 widen under contention or KV-cache pressure."
+    },
+    {
+      "title": "vLLM tokens/sec per GPU",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 20
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "sum(rate(vllm:generation_tokens_total[1m])) / count(DCGM_FI_DEV_GPU_UTIL)",
+          "legendFormat": "tok/s/GPU"
+        }
+      ],
+      "description": "Serving efficiency per card. Divide by on-demand or spot $/hr for a tokens-per-dollar signal."
+    },
+    {
+      "title": "vLLM KV-cache, running, waiting, swapped",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 31
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "unit": "short",
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": null,
+          "expr": "vllm:gpu_cache_usage_perc",
+          "legendFormat": "KV-cache usage (0..1)"
+        },
+        {
+          "refId": "B",
+          "datasource": null,
+          "expr": "vllm:num_requests_running",
+          "legendFormat": "running"
+        },
+        {
+          "refId": "C",
+          "datasource": null,
+          "expr": "vllm:num_requests_waiting",
+          "legendFormat": "waiting (backlog)"
+        },
+        {
+          "refId": "D",
+          "datasource": null,
+          "expr": "vllm:num_requests_swapped",
+          "legendFormat": "swapped (KV spill)"
+        }
+      ],
+      "description": "KV-cache is the binding resource in vLLM. Once full, new requests queue (waiting) and in-flight ones get swapped to CPU, torching TTFT. waiting > 0 or swapped > 0 = saturation."
     }
   ]
 }

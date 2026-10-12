@@ -123,6 +123,73 @@ Spot capacity is the default; if it is unfulfillable, apply on-demand with
 `-var gpu_capacity_type=ON_DEMAND`. Full walkthrough, time-slicing demo, and teardown:
 [`docs/runbook.md`](docs/runbook.md).
 
+## vLLM serving metrics (v0.3)
+
+The dashboard also surfaces the serving side of the GPU, not just the hardware side,
+because an AI-infra SRE spends more time explaining tokens-per-dollar and TTFT than
+`DCGM_FI_DEV_GPU_UTIL`. v0.3 adds four vLLM-serving panels on top of the DCGM ones,
+plus four serving-quality alerts.
+
+**The money shot: `1.1k` generation tokens/sec on a single T4** - with vLLM serving
+`facebook/opt-1.3b` at 24 concurrent streams, this is the real throughput number the
+cost conversation starts from. Divide by `$0.53/hr` on-demand (or `$0.16/hr` spot) for
+a tokens-per-dollar figure.
+
+![vLLM tokens/sec per GPU](docs/screenshots/04-vllm-tokens-per-gpu-1100.png)
+
+**Everything else, under the same load**: generation + prompt throughput, TTFT and E2E
+latency percentiles, and the KV-cache/queue/swap signals all live together with the
+hardware panels so a shift in any of them is interpretable alongside the others.
+
+![vLLM serving panels under load](docs/screenshots/03-vllm-serving-under-load.png)
+
+**Latency percentiles** - TTFT p50 and p95 sit near zero at the bottom (prefill is fast
+on a small model), while E2E p50/p95/p99 spread across 1.6-2.5s, driven by the
+24-concurrency generation workload. The widening between p50 and p99 is the signal to
+watch under scale.
+
+![vLLM latency percentiles](docs/screenshots/05-vllm-latency.png)
+
+**Running queue depth** stabilizes around 24 - matching the concurrency vLLM admits
+before the KV-cache binds. The dip is the loadgen Job restarting between runs; the
+cliff back up is the scheduler ramping to steady state again within a few seconds.
+
+![vLLM running queue](docs/screenshots/07-kv-cache-expanded.png)
+
+### What's in the v0.3 panels
+
+- **Throughput** - `rate(vllm:generation_tokens_total[1m])` and prompt tokens/sec.
+  The number every FinOps conversation about a serving fleet starts with.
+- **Latency percentiles** - TTFT p50/p95 and E2E p50/p95/p99 via `histogram_quantile`
+  over the vLLM histograms. TTFT = scheduler + prefill (what the user feels as
+  "the model started answering"); E2E = full request.
+- **tokens/sec per GPU** - a stat tile for serving efficiency. Divide by instance
+  `$/hr` for tokens-per-dollar.
+- **KV-cache + queue + swap** - `vllm:gpu_cache_usage_perc`, `vllm:num_requests_running`,
+  `vllm:num_requests_waiting`, `vllm:num_requests_swapped`. KV-cache is the binding
+  resource for vLLM throughput; `waiting > 0` or `swapped > 0` are the saturation
+  signals.
+
+### Serving-quality alerts
+
+Alongside the DCGM-level `GPUAllocatedButIdle` / `GPUHighMemoryPressure`, four
+serving-quality alerts in `manifests/alerts/vllm-serving-alerts.yaml`:
+
+| Alert | Fires on | Why it matters |
+|------|---------|---------------|
+| `VLLMHighTTFT` | `job:vllm_ttft_seconds:p95 > 2s` for 5m | User-visible slowness; usually KV-cache near full |
+| `VLLMQueueBackup` | `avg(vllm:num_requests_waiting[5m]) > 5` for 5m | Capacity undersized or admission unbounded |
+| `VLLMKVCacheSaturated` | `vllm:gpu_cache_usage_perc > 0.95` for 5m | Next requests cannot schedule without swap |
+| `VLLMSwappingUnderLoad` | `vllm:num_requests_swapped > 0` for 10m | Tail-latency killer; capacity decision point |
+
+Record rules precompute `job:vllm_tokens_per_sec:rate1m`, `job:vllm_ttft_seconds:p95`,
+and `job:vllm_e2e_seconds:p99` so dashboards and alerts share a single evaluation.
+
+Together with the hardware panels this is the full "is this GPU being used **well**?"
+picture: idle vs busy (DCGM), busy vs working (`GR_ENGINE_ACTIVE` vs `GPU_UTIL`),
+working vs delivering (vLLM tokens/sec, TTFT), delivering vs cost-efficient
+(tokens/sec per GPU).
+
 ## Teardown
 
 ```bash
