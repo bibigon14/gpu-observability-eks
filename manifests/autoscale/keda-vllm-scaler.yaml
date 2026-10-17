@@ -1,0 +1,35 @@
+# KEDA ScaledObject that scales vLLM horizontally on queue backup.
+#
+# The signal is vllm:num_requests_waiting - the live backlog of requests the
+# scheduler could not admit yet because the KV-cache is full. That is the
+# only honest capacity signal for an LLM server: GPU_UTIL and tokens/sec
+# say "the one GPU I have is busy", they don't say "I need more GPUs".
+# num_requests_waiting > 0 does.
+#
+# threshold = 5 requests in queue sustained triggers scale-up. With 5
+# streams waiting, p95 TTFT already starts climbing, which is where the
+# user starts noticing. 2 pods on 2 GPU nodes doubles the admission
+# bandwidth of the KV-cache, and the queue drains.
+#
+# cooldownPeriod is deliberately long (5 min) because vLLM cold start is
+# 2-5 min (image pull + model weight download + VRAM load). Flapping on a
+# metric that only clears after a 5m cold start would starve the service.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm-queue-depth
+  namespace: workloads
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: 1
+  maxReplicaCount: 2
+  pollingInterval: 15   # seconds between Prometheus queries
+  cooldownPeriod: 300   # 5 min min between scale-down events; see note above
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        metricName: vllm_num_requests_waiting
+        threshold: "5"
+        query: avg(vllm:num_requests_waiting)

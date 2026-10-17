@@ -1,0 +1,77 @@
+# Scheduled chaos: kill a vLLM pod every 5 minutes.
+#
+# Why - the dashboards and SLO burn-rate alerts need to be shown REACTING
+# to failure, not just sitting at 100% compliance. Killing a replica every
+# 5 minutes drives the "pod is being replaced -> KV-cache rebuilds from
+# scratch -> TTFT spikes -> SLO budget starts burning" cycle, which is
+# exactly the chain of signals a Senior SRE audience wants to see hang
+# together on one dashboard.
+#
+# For a production path, see github.com/bibigon14/chaos-scheduler-operator
+# which does the same thing via a CRD + SLO burn-rate guardrails (auto-pause
+# experiments when the budget is burning too fast).
+#
+# ServiceAccount scoped to workloads namespace only, with just the delete
+# permission on pods - no cluster-wide escalation.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaos-killer
+  namespace: workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaos-killer
+  namespace: workloads
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaos-killer
+  namespace: workloads
+subjects:
+  - kind: ServiceAccount
+    name: chaos-killer
+    namespace: workloads
+roleRef:
+  kind: Role
+  name: chaos-killer
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vllm-chaos-killer
+  namespace: workloads
+spec:
+  schedule: "*/5 * * * *"   # every 5 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: chaos-killer
+          restartPolicy: Never
+          containers:
+            - name: kubectl
+              image: bitnami/kubectl:1.31
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  POD=$(kubectl -n workloads get pod -l app=vllm -o name | shuf -n 1)
+                  if [ -z "$POD" ]; then
+                    echo "no vllm pods found"
+                    exit 0
+                  fi
+                  echo "[chaos] killing $POD at $(date -u +%FT%TZ)"
+                  kubectl -n workloads delete "$POD" --wait=false

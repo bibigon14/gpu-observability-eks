@@ -265,6 +265,94 @@ Open the dashboard and the picture reads top-to-bottom as:
 The order is deliberate - it is the same order someone would ask about an
 AI-serving system in an interview.
 
+## HPA on queue depth + chaos (v0.5)
+
+v0.4 added the SLO and the error budget. v0.5 closes two loops on top of it:
+a horizontal autoscaler that reacts to the real capacity signal, and a chaos
+experiment that proves the SLO burn-rate alerts actually fire when the
+service is actually in trouble - not just when a dashboard looks pretty.
+
+### KEDA ScaledObject on num_requests_waiting
+
+The signal is `vllm:num_requests_waiting` - the live backlog of requests the
+scheduler could not admit yet because the KV-cache is full. That is the only
+honest capacity signal for an LLM server: `GPU_UTIL` and tokens/sec say
+"the one GPU I have is busy", they do not say "I need more GPUs".
+`num_requests_waiting > 0` does.
+
+`manifests/autoscale/keda-vllm-scaler.yaml` wires a KEDA Prometheus trigger
+at threshold 5 against `avg(vllm:num_requests_waiting)` with
+`minReplicaCount=1`, `maxReplicaCount=2`, 15s polling and a 5m cooldown.
+Cooldown is long on purpose - vLLM cold start is 2-5 min (image pull +
+model weight download + VRAM load), so flapping on a metric that only
+clears after a 5m cold start would starve the service.
+
+To actually trigger a scaling event on `facebook/opt-1.3b` (the KV-cache
+easily fits 96 concurrent streams on a T4), vLLM is deployed with
+`--max-num-seqs=48` as a demo-only admission ceiling - with 96 workers in
+the load generator this guarantees ~48 running and ~48 waiting, which is
+well above the threshold. In a real multi-tenant serving fleet the ceiling
+is natural (bigger models, longer contexts, more concurrent users); the
+`--max-num-seqs` is just here so the demo closes the loop deterministically
+on a tiny model.
+
+**Scaling event in action** - KEDA observes the queue, HPA requests one more
+replica, the second pod schedules on the second GPU node:
+
+![HPA 1 to 2 - scaling event, second pod pending](docs/screenshots/v05-hpa-scaling-event.png)
+
+**Post-scale steady state** - both pods `1/1 Running` on separate GPU nodes,
+queue drained from 24 to ~1.5 as combined admission capacity doubled, p95
+response time dropped from ~2.7s to ~1.4s under the same load:
+
+![HPA scaled to 2 replicas, queue drained](docs/screenshots/v05-hpa-scaled-steady.png)
+
+### Chaos: scheduled vLLM pod kill vs the SLO
+
+`manifests/chaos/vllm-pod-killer.yaml` is a scoped `CronJob` + `Role` that
+deletes a random vLLM pod every 5 minutes. ServiceAccount has only
+`delete pods` in `workloads` namespace - no cluster-wide escalation.
+
+With the autoscaled 2-replica serving layer, each kill drops the fleet to
+one pod for the 2-5 min it takes the replacement to come back. During that
+window the surviving pod gets 96 streams through a 48-slot admission ceiling,
+`vllm:num_requests_waiting` spikes, TTFT goes over the 1s SLO budget, and
+the burn-rate alerts fire.
+
+The money shot - SLO compliance dropped from 100% to ~83% after the
+second kill cycle, and the 1h burn rate climbed to ~30, crossing both the
+slow-burn (6) and fast-burn (14.4) thresholds. Both `VLLMTTFTBudgetSlowBurn`
+and `VLLMTTFTBudgetFastBurn` alerts are firing on this capture. The cost
+tiles also tell on themselves: `tokens/$` dropped from 10M (steady state)
+to 6M (one surviving pod carrying 96 streams through 48 slots), and
+`$ per 1M tokens` doubled from $0.098 to $0.180 - chaos is visible in
+the FinOps panel too.
+
+![SLO compliance, burn rate crossing both thresholds, cost impact from chaos](docs/screenshots/v05-chaos-slo-burn.png)
+
+**For a production path** (not a demo) see
+[chaos-scheduler-operator](https://github.com/bibigon14/chaos-scheduler-operator)
+which does the same thing via a CRD with SLO burn-rate guardrails - the
+operator auto-pauses chaos experiments when the budget is burning too fast,
+so chaos itself can't push the service out of SLO.
+
+### What this proves end-to-end
+
+The hardware → serving → promise → cost ladder from v0.4 now has one more
+column: the service responds to pressure (HPA scales) and the SLO responds
+to failure (burn-rate alerts fire). Open the dashboard during chaos and the
+whole story reads top-down:
+
+- Hardware: GPU_UTIL spikes and dips as the killed pod's GPU idles then
+  comes back (DCGM gap panels).
+- Serving: throughput sawtooth, latency percentiles widen each cycle (vLLM
+  panels).
+- Capacity response: HPA adds a replica when the queue backs up (`REPLICAS: 2`).
+- Promise: SLO compliance dips below 99.5%, burn rate crosses thresholds,
+  alerts fire.
+- Cost: `tokens/$` goes UP under chaos (two replicas share the load more
+  efficiently per GPU-hour than one did).
+
 ## Teardown
 
 ```bash
